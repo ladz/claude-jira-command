@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- Config loading ---
+
+[[ -f "${HOME}/.jira.env" ]] && source "${HOME}/.jira.env"
+
+find_local_env() {
+  local dir="$PWD"
+  while [[ "$dir" != "/" ]]; do
+    [[ -f "${dir}/.jira.env" ]] && echo "${dir}/.jira.env" && return
+    dir="$(dirname "$dir")"
+  done
+}
+
+local_env=$(find_local_env)
+[[ -n "$local_env" ]] && source "$local_env"
+
+: "${JIRA_BASE_URL:?JIRA_BASE_URL not set}"
+: "${JIRA_USER:?JIRA_USER not set}"
+: "${JIRA_TOKEN:?JIRA_TOKEN not set}"
+: "${JIRA_PROJECT:?JIRA_PROJECT not set (add .jira.env to project folder)}"
+
+API="${JIRA_BASE_URL}/rest/api/3"
+AUTH=$(printf '%s:%s' "${JIRA_USER}" "${JIRA_TOKEN}" | base64 -w0 2>/dev/null || base64)
+
+# --- Helpers ---
+
+die() { echo "error: $*" >&2; exit 1; }
+
+require_args() {
+  local cmd="$1" need="$2" got="$3"
+  (( got >= need )) || die "'${cmd}' requires at least ${need} argument(s)"
+}
+
+jira_curl() {
+  local response http_code body
+  response=$(curl -s -w '\n%{http_code}' \
+    -H "Authorization: Basic ${AUTH}" \
+    -H "Content-Type: application/json" \
+    "$@")
+  http_code=$(tail -1 <<< "$response")
+  body=$(sed '$d' <<< "$response")
+
+  if (( http_code < 200 || http_code >= 300 )); then
+    local msg
+    msg=$(echo "$body" | jq -r '.errorMessages[0] // .errors // "unknown error"' 2>/dev/null || echo "$body")
+    die "API returned ${http_code}: ${msg}"
+  fi
+
+  echo "$body"
+}
+
+url_encode() {
+  jq -rn --arg v "$1" '$v|@uri'
+}
+
+# --- Commands ---
+
+cmd_create() {
+  require_args "create" 1 $#
+  local summary="$1" type="${2:-Story}"
+
+  local payload
+  payload=$(jq -n \
+    --arg proj "$JIRA_PROJECT" \
+    --arg sum "$summary" \
+    --arg type "$type" \
+    '{fields: {project: {key: $proj}, summary: $sum, issuetype: {name: $type}}}')
+
+  jira_curl -X POST "${API}/issue" -d "$payload" | jq -r '.key'
+}
+
+cmd_update() {
+  require_args "update" 3 $#
+  local key="$1" field="$2" value="$3"
+
+  local payload
+  payload=$(jq -n --arg f "$field" --arg v "$value" '{fields: {($f): $v}}')
+
+  jira_curl -X PUT "${API}/issue/${key}" -d "$payload" > /dev/null
+  echo "Updated ${key}"
+}
+
+cmd_transition() {
+  require_args "transition" 2 $#
+  local key="$1" target="$2"
+
+  local transitions transition_id transition_name
+  transitions=$(jira_curl "${API}/issue/${key}/transitions")
+
+  transition_id=$(echo "$transitions" | jq -r --arg t "$target" \
+    '.transitions[] | select(.id == $t or .name == $t) | .id')
+  transition_name=$(echo "$transitions" | jq -r --arg t "$target" \
+    '.transitions[] | select(.id == $t or .name == $t) | .name')
+
+  [[ -z "$transition_id" ]] && {
+    local available
+    available=$(echo "$transitions" | jq -r '.transitions[] | [.id, .name] | join("\t")' | sed 's/^/  /')
+    die "unknown transition '${target}' -- available:\n${available}"
+  }
+
+  jira_curl -X POST "${API}/issue/${key}/transitions" \
+    -d "$(jq -n --arg id "$transition_id" '{transition: {id: $id}}')" > /dev/null
+  echo "Transitioned ${key} to '${transition_name}'"
+}
+
+cmd_transitions() {
+  require_args "transitions" 1 $#
+  local key="$1"
+
+  jira_curl "${API}/issue/${key}/transitions" \
+    | jq -r '.transitions[] | [.id, .name] | @tsv'
+}
+
+cmd_show() {
+  require_args "show" 1 $#
+  local key="$1"
+
+  jira_curl "${API}/issue/${key}" \
+    | jq '{
+        key: .key,
+        summary: .fields.summary,
+        status: .fields.status.name,
+        assignee: (.fields.assignee.displayName // "unassigned")
+      }'
+}
+
+cmd_list() {
+  local jql="project=${JIRA_PROJECT} AND statusCategory != Done ORDER BY created DESC"
+
+  local payload
+  payload=$(jq -n \
+    --arg jql "$jql" \
+    '{jql: $jql, maxResults: 50, fields: ["summary", "status", "assignee"]}')
+
+  local result
+  result=$(jira_curl -X POST "${API}/search/jql" -d "$payload")
+
+  local count
+  count=$(echo "$result" | jq '.issues | length')
+  (( count == 0 )) && { echo "No open issues." >&2; return; }
+
+  echo "$result" | jq -r '.issues[] | [.key, .fields.status.name, .fields.summary] | @tsv'
+}
+
+# --- Dispatch ---
+
+case "${1:-}" in
+  create)      shift; cmd_create "$@" ;;
+  update)      shift; cmd_update "$@" ;;
+  transition)  shift; cmd_transition "$@" ;;
+  transitions) shift; cmd_transitions "$@" ;;
+  show)        shift; cmd_show "$@" ;;
+  list)        cmd_list ;;
+  *)
+    cat <<'EOF'
+Usage:
+  jira create <summary> [type]
+  jira update <key> <field> <value>
+  jira transition <key> <status>
+  jira transitions <key>
+  jira show <key>
+  jira list
+EOF
+    exit 1
+    ;;
+esac

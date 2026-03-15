@@ -1,0 +1,18 @@
+# Environment and credentials
+.jira.env
+*.env
+!.env.example
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Task files with sensitive project data
+# Uncomment if you don't want to track tasks:
+# tasks/
