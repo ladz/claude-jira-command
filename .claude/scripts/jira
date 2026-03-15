@@ -26,7 +26,7 @@ AUTH=$(printf '%s:%s' "${JIRA_USER}" "${JIRA_TOKEN}" | base64 -w0 2>/dev/null ||
 
 # --- Helpers ---
 
-die() { echo "error: $*" >&2; exit 1; }
+die() { printf 'error: %b\n' "$*" >&2; exit 1; }
 
 require_args() {
   local cmd="$1" need="$2" got="$3"
@@ -51,8 +51,37 @@ jira_curl() {
   echo "$body"
 }
 
-url_encode() {
-  jq -rn --arg v "$1" '$v|@uri'
+# --- Markdown to ADF ---
+
+md_to_adf() {
+  command -v pandoc >/dev/null 2>&1 || die "pandoc is required for markdown conversion but not found in PATH"
+  pandoc -f markdown -t json | jq '
+    def inlines(marks):
+      if .t == "Str" then {type:"text",text:.c} + if marks|length>0 then {marks:marks} else {} end
+      elif .t == "Space" or .t == "SoftBreak" then {type:"text",text:" "} + if marks|length>0 then {marks:marks} else {} end
+      elif .t == "LineBreak" then {type:"hardBreak"}
+      elif .t == "Strong" then .c[] | inlines(marks+[{type:"strong"}])
+      elif .t == "Emph" then .c[] | inlines(marks+[{type:"em"}])
+      elif .t == "Code" then {type:"text",text:.c[1]} + {marks:(marks+[{type:"code"}])}
+      elif .t == "Link" then (.c[2][0]) as $href | .c[1][] | inlines(marks+[{type:"link",attrs:{href:$href}}])
+      elif .t == "Strikeout" then .c[] | inlines(marks)
+      elif .c and (.c|type) == "array" then .c[] | if type == "object" then inlines(marks) else empty end
+      else empty
+      end;
+
+    def blocks:
+      if .t == "Para" or .t == "Plain" then {type:"paragraph",content:[.c[]|inlines([])]}
+      elif .t == "Header" then {type:"heading",attrs:{level:.c[0]},content:[.c[2][]|inlines([])]}
+      elif .t == "BulletList" then {type:"bulletList",content:[.c[]|{type:"listItem",content:[.[]|blocks]}]}
+      elif .t == "OrderedList" then {type:"orderedList",content:[.c[1][]|{type:"listItem",content:[.[]|blocks]}]}
+      elif .t == "BlockQuote" then {type:"blockquote",content:[.c[]|blocks]}
+      elif .t == "CodeBlock" then {type:"codeBlock"} + (if .c[0][1][0] then {attrs:{language:.c[0][1][0]}} else {} end) + {content:[{type:"text",text:.c[1]}]}
+      elif .t == "HorizontalRule" then {type:"rule"}
+      else empty
+      end;
+
+    {type:"doc",version:1,content:[.blocks[]|blocks]}
+  '
 }
 
 # --- Commands ---
@@ -63,15 +92,14 @@ cmd_create() {
 
   local payload
   if [[ -n "$description" ]]; then
+    local adf
+    adf=$(printf '%s' "$description" | md_to_adf)
     payload=$(jq -n \
       --arg proj "$JIRA_PROJECT" \
       --arg sum "$summary" \
       --arg type "$type" \
-      --arg desc "$description" \
-      '{fields: {project: {key: $proj}, summary: $sum, issuetype: {name: $type},
-        description: {type: "doc", version: 1, content:
-          [$desc | split("\n\n") | .[] | select(length > 0) |
-            {type: "paragraph", content: [{type: "text", text: .}]}]}}}')
+      --argjson desc "$adf" \
+      '{fields: {project: {key: $proj}, summary: $sum, issuetype: {name: $type}, description: $desc}}')
   else
     payload=$(jq -n \
       --arg proj "$JIRA_PROJECT" \
@@ -98,19 +126,20 @@ cmd_transition() {
   require_args "transition" 2 $#
   local key="$1" target="$2"
 
-  local transitions transition_id transition_name
+  local transitions match transition_id transition_name
   transitions=$(jira_curl "${API}/issue/${key}/transitions")
 
-  transition_id=$(echo "$transitions" | jq -r --arg t "$target" \
-    '.transitions[] | select(.id == $t or .name == $t) | .id')
-  transition_name=$(echo "$transitions" | jq -r --arg t "$target" \
-    '.transitions[] | select(.id == $t or .name == $t) | .name')
+  match=$(echo "$transitions" | jq -r --arg t "$target" \
+    '.transitions[] | select(.id == $t or .name == $t) | [.id, .name] | @tsv')
 
-  [[ -z "$transition_id" ]] && {
+  if [[ -z "$match" ]]; then
     local available
     available=$(echo "$transitions" | jq -r '.transitions[] | [.id, .name] | join("\t")' | sed 's/^/  /')
     die "unknown transition '${target}' -- available:\n${available}"
-  }
+  fi
+
+  transition_id=$(cut -f1 <<< "$match")
+  transition_name=$(cut -f2 <<< "$match")
 
   jira_curl -X POST "${API}/issue/${key}/transitions" \
     -d "$(jq -n --arg id "$transition_id" '{transition: {id: $id}}')" > /dev/null

@@ -7,6 +7,7 @@ Minimal Jira CLI for Kanban-style workflows. Manages issues via the Jira REST AP
 - `bash` 4+
 - `curl`
 - `jq`
+- `pandoc`
 
 ## Project structure
 
@@ -63,7 +64,9 @@ Generate an API token at https://id.atlassian.net/manage-profile/security/api-to
 .claude/scripts/jira list
 ```
 
-`create` returns the new issue key. `transitions` lists available status transitions for an issue (id and name, tab-separated). `transition` accepts both a transition ID and a transition name. `list` shows all open issues as tab-separated output (key, status, summary).
+`create` returns the new issue key. Markdown descriptions are automatically converted to Atlassian Document Format (ADF) via `pandoc`, so headings, lists, code blocks, links, bold, italic, and blockquotes render natively in Jira.
+
+`transitions` lists available status transitions for an issue (id and name, tab-separated). `transition` accepts both a transition ID and a transition name. `list` shows all open issues as tab-separated output (key, status, summary).
 
 ## Claude Code integration
 

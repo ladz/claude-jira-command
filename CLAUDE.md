@@ -39,7 +39,7 @@ Both commands take a path relative to the project root (e.g. `tasks/login.md`).
 
 ## Dependencies
 
-bash 4+, curl, jq. No other runtime dependencies.
+bash 4+, curl, jq, pandoc. No other runtime dependencies.
 
 ## Known limitations
 
@@ -47,6 +47,7 @@ bash 4+, curl, jq. No other runtime dependencies.
 - `cmd_list` shows all open issues (statusCategory != Done). No sprint filtering -- Scrum boards would need the Agile API and `sprint in openSprints()` JQL re-added.
 - `cmd_list` caps at 50 results with no pagination.
 - `base64` encoding uses `-w0` with a fallback for macOS compatibility.
+- `md_to_adf` handles common markdown (headings, lists, code blocks, links, bold, italic, blockquotes, horizontal rules). Tables, images, and strikethrough are not converted to ADF equivalents.
 
 ## When modifying
 
