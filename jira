@@ -59,14 +59,26 @@ url_encode() {
 
 cmd_create() {
   require_args "create" 1 $#
-  local summary="$1" type="${2:-Story}"
+  local summary="$1" type="${2:-Task}" description="${3:-}"
 
   local payload
-  payload=$(jq -n \
-    --arg proj "$JIRA_PROJECT" \
-    --arg sum "$summary" \
-    --arg type "$type" \
-    '{fields: {project: {key: $proj}, summary: $sum, issuetype: {name: $type}}}')
+  if [[ -n "$description" ]]; then
+    payload=$(jq -n \
+      --arg proj "$JIRA_PROJECT" \
+      --arg sum "$summary" \
+      --arg type "$type" \
+      --arg desc "$description" \
+      '{fields: {project: {key: $proj}, summary: $sum, issuetype: {name: $type},
+        description: {type: "doc", version: 1, content:
+          [$desc | split("\n\n") | .[] | select(length > 0) |
+            {type: "paragraph", content: [{type: "text", text: .}]}]}}}')
+  else
+    payload=$(jq -n \
+      --arg proj "$JIRA_PROJECT" \
+      --arg sum "$summary" \
+      --arg type "$type" \
+      '{fields: {project: {key: $proj}, summary: $sum, issuetype: {name: $type}}}')
+  fi
 
   jira_curl -X POST "${API}/issue" -d "$payload" | jq -r '.key'
 }
@@ -156,7 +168,7 @@ case "${1:-}" in
   *)
     cat <<'EOF'
 Usage:
-  jira create <summary> [type]
+  jira create <summary> [type] [description]
   jira update <key> <field> <value>
   jira transition <key> <status>
   jira transitions <key>

@@ -72,7 +72,7 @@ Task files live in `tasks/` as markdown with YAML frontmatter:
 ```yaml
 ---
 jira_key:
-type: Story
+type: Task
 status:
 ---
 # Implement login page
@@ -82,7 +82,7 @@ Acceptance criteria and details here...
 
 Two slash commands manage the Jira sync:
 
-`/jira-sync tasks/login.md` reads the task file, creates the Jira issue from the H1 heading and type, and writes the returned key into the frontmatter. Aborts if the task is already synced.
+`/jira-sync tasks/login.md` reads the task file, creates the Jira issue from the H1 heading, description body, and type, and writes the returned key into the frontmatter. Aborts if the task is already synced. Currently only the `Task` issue type is supported.
 
 `/jira-transition tasks/login.md` queries available transitions from Jira, presents them for selection, then updates both Jira and the frontmatter status field.
 

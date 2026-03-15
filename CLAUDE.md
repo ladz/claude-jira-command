@@ -19,7 +19,7 @@ Task files live in `tasks/` at the project root. Each file is markdown with YAML
 ```yaml
 ---
 jira_key:
-type: Story
+type: Task
 status:
 ---
 # Task title
@@ -27,7 +27,7 @@ status:
 Description and acceptance criteria...
 ```
 
-`jira_key` is empty until `/jira-sync` fills it. `type` maps to a Jira issue type. `status` reflects the current Jira board column and is updated by `/jira-transition`.
+`jira_key` is empty until `/jira-sync` fills it. `type` maps to a Jira issue type — currently only `Task` is supported. `status` reflects the current Jira board column and is updated by `/jira-transition`.
 
 ## Slash commands
 
