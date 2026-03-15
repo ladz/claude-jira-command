@@ -96,3 +96,7 @@ Two slash commands manage the Jira sync:
 `update` sets field values as plain strings. This works for text fields like `summary` but not for structured fields like `assignee`, `priority`, or `labels`, which require JSON objects. For those, use the Jira web UI or extend the script.
 
 `list` is capped at 50 results.
+
+## TODO
+
+- [ ] Convert ADF back to markdown for CLI display (e.g. in `show`), so descriptions render as readable markdown in the terminal instead of being omitted
